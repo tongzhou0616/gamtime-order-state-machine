@@ -19,6 +19,8 @@ func NewHandler(svc *order.Service) *Handler {
 func (h *Handler) Register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/v1/orders", h.createOrder)
 	mux.HandleFunc("GET /api/v1/orders/{id}", h.getOrder)
+	mux.HandleFunc("POST /api/v1/orders/{id}/authorize", h.authorizePayment)
+	mux.HandleFunc("POST /api/v1/orders/{id}/complete", h.completeOrder)
 }
 
 func (h *Handler) createOrder(w http.ResponseWriter, r *http.Request) {
@@ -40,11 +42,35 @@ func (h *Handler) getOrder(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, o)
 }
 
-func statusForError(err error) int {
-	if errors.Is(err, order.ErrOrderNotFound) {
-		return http.StatusNotFound
+func (h *Handler) authorizePayment(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	o, err := h.service.AuthorizePayment(id)
+	if err != nil {
+		writeError(w, statusForError(err), err)
+		return
 	}
-	return http.StatusInternalServerError
+	writeJSON(w, http.StatusOK, o)
+}
+
+func (h *Handler) completeOrder(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	o, err := h.service.CompleteOrder(id)
+	if err != nil {
+		writeError(w, statusForError(err), err)
+		return
+	}
+	writeJSON(w, http.StatusOK, o)
+}
+
+func statusForError(err error) int {
+	switch {
+	case errors.Is(err, order.ErrOrderNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, order.ErrInvalidTransition):
+		return http.StatusConflict
+	default:
+		return http.StatusInternalServerError
+	}
 }
 
 type errorResponse struct {
@@ -58,5 +84,7 @@ func writeError(w http.ResponseWriter, status int, err error) {
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
 }
