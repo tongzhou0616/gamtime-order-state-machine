@@ -3,9 +3,9 @@ package payment
 import "errors"
 
 var (
-	ErrPaymentDeclined  = errors.New("payment declined")
-	ErrCompletionFailed = errors.New("completion failed")
-	ErrVoidFailed       = errors.New("void failed")
+	ErrPaymentDeclined   = errors.New("payment declined")
+	ErrCompletionFailed  = errors.New("completion failed")
+	ErrVoidFailed        = errors.New("void failed")
 )
 
 type Payment interface {
@@ -39,4 +39,18 @@ func (s *Stub) Void(orderID string) error {
 		return s.VoidFn(orderID)
 	}
 	return nil
+}
+
+func NewStubFromEnv(authorizeFail, completeFail, voidFail bool) *Stub {
+	stub := &Stub{}
+	if authorizeFail {
+		stub.AuthorizeFn = func(string) error { return ErrPaymentDeclined }
+	}
+	if completeFail {
+		stub.CompleteFn = func(string) error { return ErrCompletionFailed }
+	}
+	if voidFail {
+		stub.VoidFn = func(string) error { return ErrVoidFailed }
+	}
+	return stub
 }
