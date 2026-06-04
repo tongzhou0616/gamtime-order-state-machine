@@ -1,6 +1,8 @@
 package order_test
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/gametime/order-state-machine/internal/order"
@@ -73,6 +75,12 @@ func TestPaymentDecline(t *testing.T) {
 	if voidCalls != 0 {
 		t.Fatalf("void called %d times, want 0", voidCalls)
 	}
+	if len(o.History) != 1 {
+		t.Fatalf("history length = %d, want 1", len(o.History))
+	}
+	if o.History[0].To != order.StateRejected {
+		t.Fatalf("transition to = %q, want %q", o.History[0].To, order.StateRejected)
+	}
 }
 
 func TestCompletionFailureVoidSucceeds(t *testing.T) {
@@ -81,14 +89,31 @@ func TestCompletionFailureVoidSucceeds(t *testing.T) {
 	}
 	svc := newTestService(stub)
 
-	o, _ := svc.CreateOrder()
-	o, _ = svc.AuthorizePayment(o.ID)
-	o, err := svc.CompleteOrder(o.ID)
+	o, err := svc.CreateOrder()
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+	o, err = svc.AuthorizePayment(o.ID)
+	if err != nil {
+		t.Fatalf("AuthorizePayment: %v", err)
+	}
+
+	o, err = svc.CompleteOrder(o.ID)
 	if err != nil {
 		t.Fatalf("CompleteOrder: %v", err)
 	}
 	if o.State != order.StateCancelled {
-		t.Fatalf("state = %q, want cancelled", o.State)
+		t.Fatalf("state = %q, want %q", o.State, order.StateCancelled)
+	}
+	if len(o.History) != 2 {
+		t.Fatalf("history length = %d, want 2", len(o.History))
+	}
+	last := o.History[len(o.History)-1]
+	if last.To != order.StateCancelled {
+		t.Fatalf("last transition to = %q, want %q", last.To, order.StateCancelled)
+	}
+	if !strings.Contains(last.Note, "complete") {
+		t.Fatalf("expected completion failure in note, got %q", last.Note)
 	}
 }
 
@@ -99,13 +124,44 @@ func TestCompletionFailureVoidFails(t *testing.T) {
 	}
 	svc := newTestService(stub)
 
-	o, _ := svc.CreateOrder()
-	o, _ = svc.AuthorizePayment(o.ID)
-	o, err := svc.CompleteOrder(o.ID)
+	o, err := svc.CreateOrder()
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+	o, err = svc.AuthorizePayment(o.ID)
+	if err != nil {
+		t.Fatalf("AuthorizePayment: %v", err)
+	}
+
+	o, err = svc.CompleteOrder(o.ID)
 	if err != nil {
 		t.Fatalf("CompleteOrder: %v", err)
 	}
 	if o.State != order.StateNeedsAttention {
-		t.Fatalf("state = %q, want needs_attention", o.State)
+		t.Fatalf("state = %q, want %q", o.State, order.StateNeedsAttention)
+	}
+	if o.State == order.StateCancelled {
+		t.Fatal("order must not be silently cancelled when void fails")
+	}
+	last := o.History[len(o.History)-1]
+	if !strings.Contains(last.Note, "complete") || !strings.Contains(last.Note, "void") {
+		t.Fatalf("note must surface both errors, got %q", last.Note)
+	}
+}
+
+func TestInvalidTransition(t *testing.T) {
+	svc := newTestService(&payment.Stub{})
+
+	o, err := svc.CreateOrder()
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+
+	_, err = svc.CompleteOrder(o.ID)
+	if err == nil {
+		t.Fatal("expected error completing from initialized")
+	}
+	if !errors.Is(err, order.ErrInvalidTransition) {
+		t.Fatalf("error = %v, want ErrInvalidTransition", err)
 	}
 }
