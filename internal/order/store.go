@@ -36,6 +36,38 @@ func (s *MemoryStore) Create() (*Order, error) {
 		ID:    id,
 		State: StateInitialized,
 	}
-	s.orders[id] = o
-	return o, nil
+	s.orders[id] = cloneOrder(o)
+	return cloneOrder(o), nil
+}
+
+func (s *MemoryStore) Get(id string) (*Order, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	o, ok := s.orders[id]
+	if !ok {
+		return nil, ErrOrderNotFound
+	}
+	return cloneOrder(o), nil
+}
+
+func (s *MemoryStore) Update(o *Order) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.orders[o.ID]; !ok {
+		return ErrOrderNotFound
+	}
+	s.orders[o.ID] = cloneOrder(o)
+	return nil
+}
+
+func cloneOrder(o *Order) *Order {
+	history := make([]HistoryEntry, len(o.History))
+	copy(history, o.History)
+	return &Order{
+		ID:      o.ID,
+		State:   o.State,
+		History: history,
+	}
 }
