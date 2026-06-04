@@ -91,3 +91,21 @@ func TestCompletionFailureVoidSucceeds(t *testing.T) {
 		t.Fatalf("state = %q, want cancelled", o.State)
 	}
 }
+
+func TestCompletionFailureVoidFails(t *testing.T) {
+	stub := &payment.Stub{
+		CompleteFn: func(string) error { return payment.ErrCompletionFailed },
+		VoidFn:     func(string) error { return payment.ErrVoidFailed },
+	}
+	svc := newTestService(stub)
+
+	o, _ := svc.CreateOrder()
+	o, _ = svc.AuthorizePayment(o.ID)
+	o, err := svc.CompleteOrder(o.ID)
+	if err != nil {
+		t.Fatalf("CompleteOrder: %v", err)
+	}
+	if o.State != order.StateNeedsAttention {
+		t.Fatalf("state = %q, want needs_attention", o.State)
+	}
+}
