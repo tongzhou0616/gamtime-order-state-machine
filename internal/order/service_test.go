@@ -46,3 +46,31 @@ func TestHappyPath(t *testing.T) {
 		}
 	}
 }
+
+func TestPaymentDecline(t *testing.T) {
+	voidCalls := 0
+	stub := &payment.Stub{
+		AuthorizeFn: func(string) error { return payment.ErrPaymentDeclined },
+		VoidFn: func(string) error {
+			voidCalls++
+			return nil
+		},
+	}
+	svc := newTestService(stub)
+
+	o, err := svc.CreateOrder()
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+
+	o, err = svc.AuthorizePayment(o.ID)
+	if err != nil {
+		t.Fatalf("AuthorizePayment: %v", err)
+	}
+	if o.State != order.StateRejected {
+		t.Fatalf("state = %q, want %q", o.State, order.StateRejected)
+	}
+	if voidCalls != 0 {
+		t.Fatalf("void called %d times, want 0", voidCalls)
+	}
+}
