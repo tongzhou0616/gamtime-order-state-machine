@@ -74,3 +74,20 @@ func TestPaymentDecline(t *testing.T) {
 		t.Fatalf("void called %d times, want 0", voidCalls)
 	}
 }
+
+func TestCompletionFailureVoidSucceeds(t *testing.T) {
+	stub := &payment.Stub{
+		CompleteFn: func(string) error { return payment.ErrCompletionFailed },
+	}
+	svc := newTestService(stub)
+
+	o, _ := svc.CreateOrder()
+	o, _ = svc.AuthorizePayment(o.ID)
+	o, err := svc.CompleteOrder(o.ID)
+	if err != nil {
+		t.Fatalf("CompleteOrder: %v", err)
+	}
+	if o.State != order.StateCancelled {
+		t.Fatalf("state = %q, want cancelled", o.State)
+	}
+}
