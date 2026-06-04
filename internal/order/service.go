@@ -46,6 +46,26 @@ func (s *Service) AuthorizePayment(id string) (*Order, error) {
 	return s.persist(o)
 }
 
+func (s *Service) CompleteOrder(id string) (*Order, error) {
+	o, err := s.store.Get(id)
+	if err != nil {
+		return nil, err
+	}
+
+	if o.State != StatePaymentAuthorized {
+		return nil, fmt.Errorf("%w: complete requires state %q, got %q", ErrInvalidTransition, StatePaymentAuthorized, o.State)
+	}
+
+	if err := s.payment.Complete(id); err != nil {
+		return nil, fmt.Errorf("complete order: %w", err)
+	}
+
+	if err := applyTransition(o, StateComplete, ""); err != nil {
+		return nil, err
+	}
+	return s.persist(o)
+}
+
 func (s *Service) persist(o *Order) (*Order, error) {
 	if err := s.store.Update(o); err != nil {
 		return nil, err
