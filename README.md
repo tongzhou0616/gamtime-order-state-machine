@@ -8,28 +8,27 @@ Checkout orders move through distinct stages — each with different recovery ru
 
 The core design separates three concerns:
 
-1. **State machine** (internal/order/machine.go) — defines valid transitions and records timestamped history on every change.
-2. **Service orchestration** (internal/order/service.go) — owns stage-dependent recovery: authorize decline → ejected; complete fail → void → cancelled or 
-eeds_attention.
-3. **Payment stub** (internal/payment/payment.go) — interface boundary so tests can inject failures without a real payment processor.
+1. **State machine** (`internal/order/machine.go`) — defines valid transitions and records timestamped history on every change.
+2. **Service orchestration** (`internal/order/service.go`) — owns stage-dependent recovery: authorize decline → `rejected`; complete fail → void → `cancelled` or `needs_attention`.
+3. **Payment stub** (`internal/payment/payment.go`) — interface boundary so tests can inject failures without a real payment processor.
 
-The API uses explicit endpoints (/authorize, /complete) rather than a generic "advance" action so intent is clear in both code and HTTP logs.
+The API uses explicit endpoints (`/authorize`, `/complete`) rather than a generic "advance" action so intent is clear in both code and HTTP logs.
 
 ### State Diagram
 
-`
+```
 initialized ──authorize OK──► payment_authorized ──complete OK──► complete
      │                                │
      │ authorize declined             ├──complete fail + void OK──► cancelled
      ▼                                └──complete fail + void fail──► needs_attention
   rejected
-`
+```
 
 ## How to Run
 
 **Requirements:** Go 1.22+
 
-`ash
+```bash
 # Run tests
 go test ./...
 
@@ -40,11 +39,11 @@ go run ./cmd/server
 PAYMENT_AUTHORIZE_FAIL=true go run ./cmd/server   # all authorizations decline
 COMPLETE_FAIL=true go run ./cmd/server            # all completions fail
 VOID_FAIL=true go run ./cmd/server                # all voids fail (use with COMPLETE_FAIL)
-`
+```
 
 ### Example API Flow (happy path)
 
-`ash
+```bash
 # Create order
 curl -s -X POST http://localhost:8080/api/v1/orders | jq
 
@@ -56,16 +55,16 @@ curl -s -X POST http://localhost:8080/api/v1/orders/{id}/complete | jq
 
 # Query state and history
 curl -s http://localhost:8080/api/v1/orders/{id} | jq
-`
+```
 
 ### API Reference
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | /api/v1/orders | Create a new order in initialized state |
-| POST | /api/v1/orders/{id}/authorize | Authorize payment |
-| POST | /api/v1/orders/{id}/complete | Complete the order |
-| GET | /api/v1/orders/{id} | Get current state and full history |
+| `POST` | `/api/v1/orders` | Create a new order in `initialized` state |
+| `POST` | `/api/v1/orders/{id}/authorize` | Authorize payment |
+| `POST` | `/api/v1/orders/{id}/complete` | Complete the order |
+| `GET` | `/api/v1/orders/{id}` | Get current state and full history |
 
 ## Tradeoffs
 
@@ -79,9 +78,7 @@ curl -s http://localhost:8080/api/v1/orders/{id} | jq
 
 - **Persistence** — Postgres with optimistic locking on order rows; outbox pattern for side effects.
 - **Async void retries** — queue failed voids with exponential backoff and a dead-letter queue; alert on exhaustion.
-- **Observability** — metrics on 
-eeds_attention count, structured logging, tracing through payment calls.
-- **Admin resolution API** — endpoint for ops to manually resolve 
-eeds_attention orders after investigating.
-- **Idempotency** — accept Idempotency-Key header on mutating endpoints; store results for replay.
+- **Observability** — metrics on `needs_attention` count, structured logging, tracing through payment calls.
+- **Admin resolution API** — endpoint for ops to manually resolve `needs_attention` orders after investigating.
+- **Idempotency** — accept `Idempotency-Key` header on mutating endpoints; store results for replay.
 - **OpenAPI spec** — document the API for client generation and review.
