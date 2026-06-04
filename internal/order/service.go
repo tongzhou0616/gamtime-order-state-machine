@@ -12,7 +12,10 @@ type Service struct {
 }
 
 func NewService(store Store, p payment.Payment) *Service {
-	return &Service{store: store, payment: p}
+	return &Service{
+		store:   store,
+		payment: p,
+	}
 }
 
 func (s *Service) CreateOrder() (*Order, error) {
@@ -37,13 +40,19 @@ func (s *Service) AuthorizePayment(id string) (*Order, error) {
 		if applyErr := applyTransition(o, StateRejected, fmt.Sprintf("payment declined: %v", err)); applyErr != nil {
 			return nil, applyErr
 		}
-		return s.persist(o)
+		if err := s.store.Update(o); err != nil {
+			return nil, err
+		}
+		return o, nil
 	}
 
 	if err := applyTransition(o, StatePaymentAuthorized, ""); err != nil {
 		return nil, err
 	}
-	return s.persist(o)
+	if err := s.store.Update(o); err != nil {
+		return nil, err
+	}
+	return o, nil
 }
 
 func (s *Service) CompleteOrder(id string) (*Order, error) {
@@ -57,16 +66,32 @@ func (s *Service) CompleteOrder(id string) (*Order, error) {
 	}
 
 	if err := s.payment.Complete(id); err != nil {
-		return nil, fmt.Errorf("complete order: %w", err)
+		return s.handleCompletionFailure(o, err)
 	}
 
 	if err := applyTransition(o, StateComplete, ""); err != nil {
 		return nil, err
 	}
-	return s.persist(o)
+	if err := s.store.Update(o); err != nil {
+		return nil, err
+	}
+	return o, nil
 }
 
-func (s *Service) persist(o *Order) (*Order, error) {
+func (s *Service) handleCompletionFailure(o *Order, completeErr error) (*Order, error) {
+	voidErr := s.payment.Void(o.ID)
+	if voidErr != nil {
+		note := fmt.Sprintf("complete: %v; void: %v", completeErr, voidErr)
+		if err := applyTransition(o, StateNeedsAttention, note); err != nil {
+			return nil, err
+		}
+	} else {
+		note := fmt.Sprintf("complete: %v", completeErr)
+		if err := applyTransition(o, StateCancelled, note); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := s.store.Update(o); err != nil {
 		return nil, err
 	}
